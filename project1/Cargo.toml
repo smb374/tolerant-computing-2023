@@ -13,7 +13,7 @@ name = "prj1-voting-client"
 path = "src/client.rs"
 
 [dependencies]
-tonic = { version = "0.8", features = ["prost"] }
+tonic = "0.8"
 prost = "0.11"
 prost-types = "0.11"
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
