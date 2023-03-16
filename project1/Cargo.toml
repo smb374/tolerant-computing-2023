@@ -5,17 +5,18 @@ edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 [[bin]]
-name = "voting-server"
+name = "prj1-voting-server"
 path = "src/server.rs"
 
 [[bin]]
-name = "voting-client"
+name = "prj1-voting-client"
 path = "src/client.rs"
 
 [dependencies]
 tonic = { version = "0.8", features = ["prost"] }
 prost = "0.11"
+prost-types = "0.11"
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 
 [build-dependencies]
-tonic-build = { version = "0.8", features = ["prost"] }
+tonic-build = "0.8"

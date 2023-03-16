@@ -54,6 +54,12 @@ message Election {
   AuthToken token = 5;
 }
 
+message Vote {
+  string election_name = 1;
+  string choice_name = 2;
+  AuthToken token = 3;
+}
+
 message ElectionName {
   string name = 1;
 }
