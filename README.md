@@ -13,7 +13,7 @@ docker build -t voting-system .
 ### Launch Server
 
 ```
-docker run voting-system
+docker run -d voting-system
 ```
 
 ### Run Client
