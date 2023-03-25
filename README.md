@@ -13,13 +13,13 @@ docker build -t voting-system .
 ### Launch Server
 
 ```
-docker run -d voting-system
+docker run --network=host -d voting-system
 ```
 
 ### Run Client
 
 ```
-docker run voting-server voting-client
+docker run --network=host voting-system voting-client
 ```
 
 ## Using Cargo

@@ -1,4 +1,4 @@
-syntax = "proto3";
+syntax = "proto2";
 package voting;
 import "google/protobuf/timestamp.proto";
 
@@ -8,17 +8,17 @@ service VoterRegistration {
 }
 
 message Voter {
-  string name = 1;
-  string group = 2;
-  bytes public_key = 3;
+  required string name = 1;
+  required string group = 2;
+  required bytes public_key = 3;
 }
 
 message VoterName {
-  string name = 1;
+  required string name = 1;
 }
 
 message Status {
-  int32 code = 1;
+  required int32 code = 1;
 }
 
 service eVoting {
@@ -30,46 +30,46 @@ service eVoting {
 }
 
 message Challenge {
-  bytes value = 1;
+  required bytes value = 1;
 }
 
 message Response {
-  bytes value = 1;
+  required bytes value = 1;
 }
 
 message AuthRequest {
-  VoterName name = 1;
-  Response response = 2;
+  required VoterName name = 1;
+  required Response response = 2;
 }
 
 message AuthToken {
-  bytes value = 1;
+  required bytes value = 1;
 }
 
 message Election {
-  string name = 1;
-  string groups = 2;
-  string choices = 3;
-  google.protobuf.Timestamp end_date = 4;
-  AuthToken token = 5;
+  required string name = 1;
+  required string groups = 2;
+  required string choices = 3;
+  required google.protobuf.Timestamp end_date = 4;
+  required AuthToken token = 5;
 }
 
 message Vote {
-  string election_name = 1;
-  string choice_name = 2;
-  AuthToken token = 3;
+  required string election_name = 1;
+  required string choice_name = 2;
+  required AuthToken token = 3;
 }
 
 message ElectionName {
-  string name = 1;
+  required string name = 1;
 }
 
 message VoteCount {
-  string choice_name = 1;
-  int32 count = 2;
+  required string choice_name = 1;
+  required int32 count = 2;
 }
 
 message ElectionResult {
-  int32 status = 1;
-  VoteCount count = 2;
+  required int32 status = 1;
+  required VoteCount count = 2;
 }
