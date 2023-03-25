@@ -2,7 +2,7 @@ pub mod voting {
     tonic::include_proto!("voting");
 }
 
-use std::error::Error;
+use std::{env, error::Error};
 
 use tonic::{transport::Server, Request, Response};
 
@@ -51,11 +51,16 @@ impl EVoting for Voting {
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
-    let addr = "0.0.0.0:50001".parse()?;
-    let voting = Voting::default();
-    Server::builder()
-        .add_service(EVotingServer::new(voting))
-        .serve(addr)
-        .await?;
+    let args: Vec<String> = env::args().collect();
+    if let Some(addr_str) = args.get(1) {
+        let addr = addr_str.parse()?;
+        let voting = Voting::default();
+        Server::builder()
+            .add_service(EVotingServer::new(voting))
+            .serve(addr)
+            .await?;
+    } else {
+        eprintln!("You need to specify host:port to bind!");
+    }
     Ok(())
 }
