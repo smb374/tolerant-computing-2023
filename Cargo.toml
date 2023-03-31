@@ -1,7 +1,10 @@
 [package]
 name = "voting-system"
 version = "0.1.0"
-authors = ["Po-Yeh Chen <poyehchen@cs.nctu.edu.tw>", "Shao-Fu Chen <shfchen@cs.nycu.edu.tw>"]
+authors = [
+    "Po-Yeh Chen <poyehchen@cs.nctu.edu.tw>",
+    "Shao-Fu Chen <shfchen@cs.nycu.edu.tw>",
+]
 rust-version = "1.60.0"
 edition = "2021"
 publish = false
@@ -15,10 +18,25 @@ name = "voting-client"
 path = "src/client.rs"
 
 [dependencies]
-tonic = "0.8"
+base64 = "0.21"
+dashmap = "5.4"
+flume = "0.10"
 prost = "0.11"
 prost-types = "0.11"
-tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+sharded-slab = "0.1"
+tonic = "0.8"
+
+[dependencies.ed25519-dalek]
+version = "1"
+features = ["rand_core"]
+
+[dependencies.rand_core]
+version = "0.6"
+features = ["getrandom"]
+
+[dependencies.tokio]
+version = "1"
+features = ["macros", "rt-multi-thread"]
 
 [build-dependencies]
 tonic-build = "0.8"
