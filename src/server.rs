@@ -9,7 +9,7 @@ use std::{
     time::Duration,
 };
 
-use base64::{engine::general_purpose::STANDARD, Engine};
+use base64::prelude::{Engine, BASE64_STANDARD};
 use clap::Parser;
 use dashmap::DashMap;
 use ed25519_dalek::{Digest, PublicKey, Sha512, Signature, SignatureError, Verifier};
@@ -113,7 +113,7 @@ impl VoterRegistration for VotingServer {
 
 fn digest64(data: &[u8]) -> String {
     let dgst = Sha512::digest(data);
-    STANDARD.encode(dgst.as_slice())
+    BASE64_STANDARD.encode(dgst.as_slice())
 }
 
 #[tonic::async_trait]

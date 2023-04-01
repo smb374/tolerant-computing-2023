@@ -9,6 +9,9 @@ rust-version = "1.60.0"
 edition = "2021"
 publish = false
 
+[profile.release]
+strip = "debuginfo"
+
 [[bin]]
 name = "voting-server"
 path = "src/server.rs"
@@ -21,9 +24,10 @@ path = "src/client.rs"
 base64 = "0.21"
 dashmap = "5.4"
 flume = "0.10"
+once_cell = "1.17"
 prost = "0.11"
 prost-types = "0.11"
-sharded-slab = "0.1"
+rustyline = "11.0"
 tonic = "0.8"
 
 [dependencies.clap]
@@ -35,7 +39,7 @@ version = "1"
 features = ["rand_core"]
 
 [dependencies.rand_core]
-version = "0.6"
+version = "0.5"
 features = ["getrandom"]
 
 [dependencies.tokio]
