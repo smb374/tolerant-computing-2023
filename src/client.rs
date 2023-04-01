@@ -3,18 +3,17 @@ pub mod voting {
 }
 
 use std::{
+    collections::HashMap,
     error::Error,
     net::{IpAddr, SocketAddr},
 };
 
 use base64::prelude::{Engine, BASE64_STANDARD};
 use clap::{Command, FromArgMatches, Parser, Subcommand};
-use dashmap::DashMap;
 use ed25519_dalek::{
     ed25519::signature::{Signature, SignerMut},
     Keypair,
 };
-use once_cell::sync::Lazy;
 use rand_core::OsRng;
 use rustyline::{error::ReadlineError, DefaultEditor};
 use tonic::{transport::Channel, Request};
@@ -23,8 +22,6 @@ use voting::{
     e_voting_client::EVotingClient, voter_registration_client::VoterRegistrationClient,
     AuthRequest, Voter, VoterName,
 };
-
-static USER_MAP: Lazy<DashMap<String, ClientVoter>> = Lazy::new(|| DashMap::default());
 
 struct ClientVoter {
     name: String,
@@ -68,6 +65,7 @@ enum Commands {
 async fn handle_commands(
     reg: &mut VoterRegistrationClient<Channel>,
     vote: &mut EVotingClient<Channel>,
+    users: &mut HashMap<String, ClientVoter>,
     cmds: Commands,
 ) -> Result<bool, Box<dyn Error>> {
     match cmds {
@@ -87,7 +85,7 @@ async fn handle_commands(
             });
             let resp = reg.register_voter(req).await?;
             if resp.get_ref().code == 0 {
-                USER_MAP.insert(cv.name.to_owned(), cv);
+                users.insert(cv.name.to_owned(), cv);
                 println!("Register success.");
             } else {
                 println!("Register failed with code = {}", resp.get_ref().code);
@@ -97,14 +95,14 @@ async fn handle_commands(
             let req = Request::new(VoterName { name: name.clone() });
             let resp = reg.un_register_voter(req).await?;
             if resp.get_ref().code == 0 {
-                USER_MAP.remove(&name);
+                users.remove(&name);
                 println!("Unregister success.");
             } else {
                 println!("Unregister failed with code = {}", resp.get_ref().code);
             }
         }
         Commands::Auth { name } => {
-            if let Some(cv) = USER_MAP.get_mut(&name).as_mut() {
+            if let Some(cv) = users.get_mut(&name).as_mut() {
                 let ch_resp = vote
                     .pre_auth(Request::new(VoterName { name: name.clone() }))
                     .await?;
@@ -126,7 +124,7 @@ async fn handle_commands(
             }
         }
         Commands::Exit => {
-            cleanup(reg).await?;
+            cleanup(reg, users).await?;
             return Ok(true);
         }
         _ => {
@@ -136,21 +134,24 @@ async fn handle_commands(
     Ok(false)
 }
 
-async fn cleanup(reg: &mut VoterRegistrationClient<Channel>) -> Result<(), Box<dyn Error>> {
-    for entry in USER_MAP.iter() {
+async fn cleanup(
+    reg: &mut VoterRegistrationClient<Channel>,
+    users: &mut HashMap<String, ClientVoter>,
+) -> Result<(), Box<dyn Error>> {
+    for entry in users.iter() {
         let req = Request::new(VoterName {
-            name: entry.key().clone(),
+            name: entry.0.clone(),
         });
         let resp = reg.un_register_voter(req).await?;
         if resp.get_ref().code != 0 {
             println!(
                 "Unregister user {} failed with code = {}",
-                entry.key(),
+                entry.0,
                 resp.get_ref().code
             );
         }
     }
-    USER_MAP.clear();
+    users.clear();
     Ok(())
 }
 
@@ -161,6 +162,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let endpoint = format!("http://{}/", addr);
     let mut register_client = VoterRegistrationClient::connect(endpoint.clone()).await?;
     let mut vote_client = EVotingClient::connect(endpoint).await?;
+    let mut user_map: HashMap<String, ClientVoter> = HashMap::new();
 
     let mut rl = DefaultEditor::new()?;
 
@@ -172,7 +174,14 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 match shell().try_get_matches_from(line.split_whitespace()) {
                     Ok(matches) => {
                         let cmds = Commands::from_arg_matches(&matches)?;
-                        match handle_commands(&mut register_client, &mut vote_client, cmds).await {
+                        match handle_commands(
+                            &mut register_client,
+                            &mut vote_client,
+                            &mut user_map,
+                            cmds,
+                        )
+                        .await
+                        {
                             Ok(exit) => {
                                 if exit {
                                     break;
@@ -189,7 +198,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 }
             }
             Err(ReadlineError::Eof | ReadlineError::Interrupted) => {
-                cleanup(&mut register_client).await?;
+                cleanup(&mut register_client, &mut user_map).await?;
                 println!("Exit...");
                 break;
             }
