@@ -17,20 +17,23 @@ docker run --network=host -d voting-system
 ```
 or
 ```
-docker run --network=host voting-system voting-server [host]:[port]
+docker run --network=host voting-system voting-server -H [host] -p [port]
 ```
 
-You must specify `host:port` when using the command.
+You must specify `host` when using the command.
 
-The first form has a default argument of `127.0.0.1:50001`.
+The `port` has a default value of `50001`.
+
+The first command binds on `127.0.0.1:50001`.
+
 
 ### Run Client
 
 ```
-docker run --network=host voting-system voting-client [host]:[port]
+docker run --network=host voting-system voting-client -H [host] -p [port]
 ```
 
-You must specify `host:port` when using the command.
+You must specify `host` and `port` of the server when using the command.
 
 ## Using Cargo
 
@@ -43,15 +46,15 @@ cargo build --release
 ### Launch Server
 
 ```
-cargo run --release --bin voting-server [host]:[port]
+cargo run --release --bin voting-server -H [host] -p [port]
 ```
 
-You must specify `host:port` when using the command.
+You must specify `host` and `port` when using the command.
 
 ### Run Client
 
 ```
-cargo run --release --bin voting-client [host]:[port]
+cargo run --release --bin voting-client -H [host] -p [port]
 ```
 
-You must specify `host:port` when using the command.
+You must specify `host` and `port` of the server when using the command.

@@ -2,9 +2,15 @@ pub mod voting {
     tonic::include_proto!("voting");
 }
 
-use std::{env, error::Error, sync::Arc, time::Duration};
+use std::{
+    error::Error,
+    net::{IpAddr, SocketAddr},
+    sync::Arc,
+    time::Duration,
+};
 
 use base64::{engine::general_purpose::STANDARD, Engine};
+use clap::Parser;
 use dashmap::DashMap;
 use ed25519_dalek::{Digest, PublicKey, Sha512, Signature, SignatureError, Verifier};
 use flume::{Receiver, Sender};
@@ -240,20 +246,25 @@ impl VotingServer {
     }
 }
 
+#[derive(Parser, Debug)]
+#[command(author, version, about, long_about = None)]
+struct Args {
+    #[arg(short = 'H', long)]
+    host: IpAddr,
+    #[arg(short, long, default_value_t = 50001)]
+    port: u16,
+}
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
-    let args: Vec<String> = env::args().collect();
-    if let Some(addr_str) = args.get(1) {
-        let addr = addr_str.parse()?;
-        let voting = Arc::new(VotingServer::default());
-        tokio::spawn(Arc::clone(&voting).token_expiration_handle());
-        Server::builder()
-            .add_service(VoterRegistrationServer::from_arc(Arc::clone(&voting)))
-            .add_service(EVotingServer::from_arc(Arc::clone(&voting)))
-            .serve(addr)
-            .await?;
-    } else {
-        eprintln!("You need to specify host:port to bind!");
-    }
+    let args = Args::parse();
+    let addr = SocketAddr::from((args.host, args.port));
+    let voting = Arc::new(VotingServer::default());
+    tokio::spawn(Arc::clone(&voting).token_expiration_handle());
+    Server::builder()
+        .add_service(VoterRegistrationServer::from_arc(Arc::clone(&voting)))
+        .add_service(EVotingServer::from_arc(Arc::clone(&voting)))
+        .serve(addr)
+        .await?;
     Ok(())
 }

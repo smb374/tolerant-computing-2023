@@ -2,27 +2,36 @@ pub mod voting {
     tonic::include_proto!("voting");
 }
 
-use std::{env, error::Error};
+use std::{
+    error::Error,
+    net::{IpAddr, SocketAddr},
+};
+
+use clap::Parser;
+use tonic::Request;
 
 use voting::{e_voting_client::EVotingClient, ElectionName};
 
-use tonic::Request;
+#[derive(Parser, Debug)]
+#[command(author, version, about, long_about = None)]
+struct Args {
+    #[arg(short = 'H', long)]
+    host: IpAddr,
+    #[arg(short, long, default_value_t = 50001)]
+    port: u16,
+}
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
-    let args: Vec<String> = env::args().collect();
-    if let Some(addr_str) = args.get(1) {
-        let rpc_target = format!("http://{}", addr_str);
-        let mut client = EVotingClient::connect(rpc_target).await?;
+    let args = Args::parse();
+    let addr = SocketAddr::from((args.host, args.port));
+    let mut client = EVotingClient::connect(format!("http://{}/", addr)).await?;
 
-        let req = Request::new(ElectionName {
-            name: "Test Election".to_string(),
-        });
+    let req = Request::new(ElectionName {
+        name: "Test Election".to_string(),
+    });
 
-        let resp = client.get_result(req).await?;
-        eprintln!("GetResult response = {:?}", resp);
-    } else {
-        eprintln!("You need to specify a target (e.g. http://[host]:[port]) to do gRPC!");
-    }
+    let resp = client.get_result(req).await?;
+    eprintln!("GetResult response = {:?}", resp);
     Ok(())
 }

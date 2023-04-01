@@ -21,4 +21,4 @@ FROM debian:bullseye-slim
 COPY --from=builder /usr/local/cargo/bin/voting-server /usr/local/bin/
 COPY --from=builder /usr/local/cargo/bin/voting-client /usr/local/bin/
 
-CMD ["voting-server", "127.0.0.1:50001"]
+CMD ["voting-server", "-H", "127.0.0.1"]
