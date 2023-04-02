@@ -12,7 +12,7 @@ use base64::prelude::{Engine, BASE64_STANDARD};
 use clap::{Command, FromArgMatches, Parser, Subcommand};
 use ed25519_dalek::{
     ed25519::signature::{Signature, SignerMut},
-    Keypair,
+    Digest, Keypair, Sha512,
 };
 use rand_core::OsRng;
 use rustyline::{error::ReadlineError, DefaultEditor};
@@ -68,8 +68,17 @@ enum Commands {
         #[arg(help = "Name of the user.")]
         name: String,
     },
+    #[command(about = "List various states of the client.")]
+    #[command(subcommand)]
+    List(List),
     #[command(about = "Exit shell.")]
     Exit,
+}
+
+#[derive(Subcommand, Debug)]
+enum List {
+    #[command(about = "List registerted users in this client.")]
+    User,
 }
 
 struct VotingClient {
@@ -146,12 +155,29 @@ impl VotingClient {
                             .await?;
                         let token = auth_resp.get_ref().value.as_slice();
                         if token != &[0u8; 128] {
-                            println!("Got auth token: {}", BASE64_STANDARD.encode(token));
+                            println!("Authentication success.");
                             cv.token.replace(token.to_vec());
                         }
                     }
                 }
             }
+            Commands::List(l) => match l {
+                List::User => {
+                    self.user_map.iter().for_each(|(_, v)| {
+                        let token = if let Some(tok) = v.token.as_ref() {
+                            sha512_dgst(tok)
+                        } else {
+                            String::from("nil")
+                        };
+                        let pubk = sha512_dgst(&v.key_pair.public.to_bytes());
+                        println!("name: {}", v.name);
+                        println!("group: {}", v.group);
+                        println!("public key: sha512:{}", pubk);
+                        println!("auth token: sha512:{}", token);
+                        print!("\n");
+                    });
+                }
+            },
             Commands::Exit => {
                 self.cleanup().await?;
                 return Ok(true);
@@ -237,4 +263,9 @@ fn shell() -> Command {
         .help_template(PARSER_TEMPLATE);
 
     Commands::augment_subcommands(cli)
+}
+
+fn sha512_dgst(data: &[u8]) -> String {
+    let dgst = Sha512::digest(data);
+    BASE64_STANDARD.encode(dgst)
 }
