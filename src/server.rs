@@ -100,7 +100,8 @@ impl VoterRegistration for VotingServer {
             }
         }
     }
-    async fn un_register_voter(&self, req: Request<VoterName>) -> RPCResult<Status> {
+
+    async fn unregister_voter(&self, req: Request<VoterName>) -> RPCResult<Status> {
         let n = req.into_inner();
         if self.voters.contains_key(&n.name) {
             self.voters.remove(&n.name);

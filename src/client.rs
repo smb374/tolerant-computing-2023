@@ -103,7 +103,7 @@ async fn handle_commands(
         }
         Commands::Unregister { name } => {
             let req = Request::new(VoterName { name: name.clone() });
-            let resp = reg.un_register_voter(req).await?;
+            let resp = reg.unregister_voter(req).await?;
             if resp.get_ref().code == 0 {
                 users.remove(&name);
                 println!("Unregister success.");
@@ -152,7 +152,7 @@ async fn cleanup(
         let req = Request::new(VoterName {
             name: entry.0.clone(),
         });
-        let resp = reg.un_register_voter(req).await?;
+        let resp = reg.unregister_voter(req).await?;
         if resp.get_ref().code != 0 {
             println!(
                 "Unregister user {} failed with code = {}",
