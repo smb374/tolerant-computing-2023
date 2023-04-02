@@ -1514,7 +1514,6 @@ dependencies = [
  "dashmap",
  "ed25519-dalek",
  "flume",
- "once_cell",
  "prost",
  "prost-types",
  "rand_core 0.5.1",

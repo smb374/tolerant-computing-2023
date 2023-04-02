@@ -30,6 +30,10 @@ struct ClientVoter {
     token: Option<Vec<u8>>,
 }
 
+/// Command line arguments
+///
+/// host: IP Address, V4 or V6.
+/// port: TCP port number, default = 50001
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
 struct Args {
@@ -39,6 +43,9 @@ struct Args {
     port: u16,
 }
 
+/// Repl shell command
+///
+/// Add repl shell command here with arguments and help string.
 #[derive(Subcommand, Debug)]
 enum Commands {
     #[command(about = "Register a user to the voting server.")]
@@ -62,6 +69,9 @@ enum Commands {
     Exit,
 }
 
+/// Repl shell command handler
+///
+/// Handles the command that the repl shell received.
 async fn handle_commands(
     reg: &mut VoterRegistrationClient<Channel>,
     vote: &mut EVotingClient<Channel>,
