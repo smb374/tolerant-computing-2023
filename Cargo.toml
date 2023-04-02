@@ -5,7 +5,7 @@ authors = [
     "Po-Yeh Chen <poyehchen@cs.nctu.edu.tw>",
     "Shao-Fu Chen <shfchen@cs.nycu.edu.tw>",
 ]
-rust-version = "1.60.0"
+rust-version = "1.65.0"
 edition = "2021"
 publish = false
 
@@ -28,6 +28,7 @@ prost = "0.11"
 prost-types = "0.11"
 rustyline = "11.0"
 tonic = "0.8"
+chrono = "0.4.24"
 
 [dependencies.clap]
 version = "4.2"

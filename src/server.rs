@@ -6,16 +6,11 @@ use std::{
     error::Error,
     net::{IpAddr, SocketAddr},
     sync::Arc,
-    time::Duration,
 };
 
-use base64::prelude::{Engine, BASE64_STANDARD};
 use clap::Parser;
-use dashmap::DashMap;
-use ed25519_dalek::{Digest, PublicKey, Sha512, Signature, SignatureError, Verifier};
-use flume::{Receiver, Sender};
-use rand_core::{OsRng, RngCore};
-use tokio::task::JoinHandle;
+use dashmap::{mapref::entry::Entry, DashMap};
+use ed25519_dalek::{Signature, Verifier};
 use tonic::{transport::Server, Request, Response};
 
 use voting::{
@@ -25,39 +20,15 @@ use voting::{
     VoteCount, Voter, VoterName,
 };
 
+mod internal_voter;
+mod token_manager;
+
+use internal_voter::InternalVoter;
+use token_manager::{VoterToken, TokenManager};
+
 type RPCResult<T> = Result<Response<T>, tonic::Status>;
 
-/// Internal voter representation.
-///
-/// name: Voter name.
-/// group: Voter group.
-/// public_key: Ed25519 public key for authentication.
-/// challenge: temporary challenge store for verifying response.
-/// token: Sha512 of the auth token in base64.
-#[derive(Debug)]
-struct InternalVoter {
-    name: String,
-    group: String,
-    public_key: PublicKey,
-    challenge: Option<[u8; 128]>,
-    token: Option<String>,
-}
-
-impl TryFrom<Voter> for InternalVoter {
-    type Error = SignatureError;
-    fn try_from(value: Voter) -> Result<Self, Self::Error> {
-        let public_key = PublicKey::from_bytes(&value.public_key)?;
-        Ok(Self {
-            name: value.name,
-            group: value.group,
-            public_key,
-            challenge: None,
-            token: None,
-        })
-    }
-}
-
-#[derive(Debug)]
+#[derive(Debug, Default)]
 struct VotingServer {
     // voters: A map that stores the voters that is registered.
     // key: Name of the voter.
@@ -67,54 +38,37 @@ struct VotingServer {
     // Use `contains_key` to verify if a token is valid.
     // key: Sha512 of the auth token, stored in base64.
     // value: Handle to the token expiration callback.
-    tokens: DashMap<String, JoinHandle<()>>,
-    token_notify_channel: (Sender<String>, Receiver<String>),
-}
-
-impl Default for VotingServer {
-    fn default() -> Self {
-        Self {
-            voters: DashMap::default(),
-            tokens: DashMap::default(),
-            token_notify_channel: flume::unbounded(),
-        }
-    }
+    tokens: TokenManager,
 }
 
 #[tonic::async_trait]
 impl VoterRegistration for VotingServer {
     async fn register_voter(&self, req: Request<Voter>) -> RPCResult<Status> {
         let v = req.into_inner();
-        match InternalVoter::try_from(v) {
-            Ok(v) => {
-                if self.voters.contains_key(&v.name) {
-                    Ok(Response::new(Status { code: 1 }))
-                } else {
-                    self.voters.insert(v.name.to_owned(), v);
-                    Ok(Response::new(Status { code: 0 }))
-                }
-            }
-            Err(e) => {
-                eprintln!("Malformed public key: {}", e);
-                Ok(Response::new(Status { code: 2 }))
+
+        match self.voters.entry(v.name.clone()) {
+            Entry::Occupied(_) => Ok(Response::new(Status { code: 1 })),
+            Entry::Vacant(e) => {
+                let Ok(ivoter) = InternalVoter::try_from(v) else {
+                    eprintln!("Malformed public key");
+                    return Ok(Response::new(Status { code: 2 }));
+                };
+                e.insert(ivoter);
+
+                Ok(Response::new(Status { code: 0 }))
             }
         }
     }
 
     async fn unregister_voter(&self, req: Request<VoterName>) -> RPCResult<Status> {
         let n = req.into_inner();
-        if self.voters.contains_key(&n.name) {
-            self.voters.remove(&n.name);
+
+        if self.voters.remove(&n.name).is_some() {
             Ok(Response::new(Status { code: 0 }))
         } else {
             Ok(Response::new(Status { code: 1 }))
         }
     }
-}
-
-fn digest64(data: &[u8]) -> String {
-    let dgst = Sha512::digest(data);
-    BASE64_STANDARD.encode(dgst.as_slice())
 }
 
 #[tonic::async_trait]
@@ -128,11 +82,8 @@ impl EVoting for VotingServer {
     async fn pre_auth(&self, req: Request<VoterName>) -> RPCResult<Challenge> {
         let n = req.into_inner();
         if let Some(v) = self.voters.get_mut(&n.name).as_mut() {
-            let mut buf: [u8; 128] = [0; 128];
-            OsRng.fill_bytes(&mut buf);
-            v.challenge.replace(buf.clone());
             Ok(Response::new(Challenge {
-                value: Vec::from(buf),
+                value: Vec::from(v.generate_challenge().as_slice()),
             }))
         } else {
             Ok(Response::new(Challenge {
@@ -157,51 +108,36 @@ impl EVoting for VotingServer {
     async fn auth(&self, req: Request<AuthRequest>) -> RPCResult<AuthToken> {
         let auth_req = req.into_inner();
         let name = &auth_req.name.name;
-        let r = Ok(Response::new(AuthToken {
+        let err_resp = Ok(Response::new(AuthToken {
             value: vec![0; 128],
         }));
-        if let Some(v) = self.voters.get_mut(name).as_mut() {
-            let pubk = v.public_key;
-            if let (Ok(sig), Some(msg)) = (
-                Signature::from_bytes(&auth_req.response.value),
-                v.challenge.take(),
-            ) {
-                match pubk.verify(&msg, &sig) {
-                    Ok(()) => {
-                        if let Some(k) = v.token.take() {
-                            if let Some((_, h)) = self.tokens.remove(&k) {
-                                h.abort();
-                            }
-                        }
-                        let mut buf = [0u8; 128];
-                        OsRng.fill_bytes(&mut buf);
-                        let dgst = digest64(&buf);
-                        let d = dgst.clone();
-                        let tx = self.token_notify_channel.0.clone();
-                        let handle = tokio::spawn(async move {
-                            tokio::time::sleep(Duration::from_secs(3600)).await;
-                            let _ = tx.send_async(d).await;
-                        });
-                        self.tokens.insert(dgst.clone(), handle);
-                        v.token.replace(dgst);
-                        Ok(Response::new(AuthToken {
-                            value: Vec::from(buf),
-                        }))
-                    }
-                    Err(e) => {
-                        eprintln!("Challenge-Response failed: {}", e);
-                        r
-                    }
-                }
-            } else {
-                eprintln!("Invalid Signature.");
-                r
-            }
-        } else {
+
+        let Some(mut voter_entry) = self.voters.get_mut(name) else {
             eprintln!("No such voter or challenge.");
-            r
+            return err_resp;
+        };
+        let (Ok(sig), Some(msg)) = (
+            Signature::from_bytes(&auth_req.response.value),
+            voter_entry.take_challenge(),
+        ) else {
+            eprintln!("Invalid Signature.");
+            return err_resp;
+        };
+        let pubk = voter_entry.public_key();
+
+        match pubk.verify(&msg, &sig) {
+            Ok(()) => {
+                Ok(Response::new(AuthToken {
+                    value: Vec::from(self.tokens.generate_token(voter_entry.name())),
+                }))
+            }
+            Err(e) => {
+                eprintln!("Challenge-Response failed: {}", e);
+                err_resp
+            }
         }
     }
+
     async fn create_election(&self, _req: Request<Election>) -> RPCResult<Status> {
         todo!()
     }
@@ -225,28 +161,6 @@ impl EVoting for VotingServer {
     }
 }
 
-impl VotingServer {
-    /// A task that removes the entry from self.tokens once the expiration callback of the auth
-    /// token send itself to the channel.
-    async fn token_expiration_handle(self: Arc<Self>) {
-        loop {
-            match self.token_notify_channel.1.recv_async().await {
-                Ok(k) => {
-                    if let Some((_, h)) = self.tokens.remove(&k) {
-                        // callback should be finished by here.
-                        if !h.is_finished() {
-                            h.abort();
-                        }
-                    }
-                }
-                Err(_e) => {
-                    break;
-                }
-            }
-        }
-    }
-}
-
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
 struct Args {
@@ -261,7 +175,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let args = Args::parse();
     let addr = SocketAddr::from((args.host, args.port));
     let voting = Arc::new(VotingServer::default());
-    tokio::spawn(Arc::clone(&voting).token_expiration_handle());
+
     Server::builder()
         .add_service(VoterRegistrationServer::from_arc(Arc::clone(&voting)))
         .add_service(EVotingServer::from_arc(Arc::clone(&voting)))
