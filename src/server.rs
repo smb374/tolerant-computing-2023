@@ -22,7 +22,7 @@ mod token_manager;
 pub mod voting;
 
 use internal_voter::InternalVoter;
-use token_manager::{TokenManager, VoterToken};
+use token_manager::TokenManager;
 
 type RPCResult<T> = Result<Response<T>, tonic::Status>;
 
@@ -32,10 +32,7 @@ struct VotingServer {
     // key: Name of the voter.
     // value: Internal voter representation.
     voters: DashMap<String, InternalVoter>,
-    // tokens: A map that stores token and the handle to the token expiration callback.
-    // Use `contains_key` to verify if a token is valid.
-    // key: Sha512 of the auth token, stored in base64.
-    // value: Handle to the token expiration callback.
+    // tokens: See token_manager.rs
     tokens: TokenManager,
 }
 
