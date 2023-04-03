@@ -48,8 +48,8 @@ message AuthToken {
 
 message Election {
   required string name = 1;
-  required string groups = 2;
-  required string choices = 3;
+  repeated string groups = 2;
+  repeated string choices = 3;
   required google.protobuf.Timestamp end_date = 4;
   required AuthToken token = 5;
 }
