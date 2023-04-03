@@ -1,7 +1,3 @@
-pub mod voting {
-    tonic::include_proto!("voting");
-}
-
 use std::{
     error::Error,
     net::{IpAddr, SocketAddr},
@@ -18,12 +14,12 @@ use tonic::{transport::Server, Request, Response};
 use voting::{
     e_voting_server::{EVoting, EVotingServer},
     voter_registration_server::{VoterRegistration, VoterRegistrationServer},
-    AuthRequest, AuthToken, Challenge, Election, ElectionName, ElectionResult, Status, Vote,
-    VoteCount, Voter, VoterName,
+    *,
 };
 
 mod internal_voter;
 mod token_manager;
+pub mod voting;
 
 use internal_voter::InternalVoter;
 use token_manager::{TokenManager, VoterToken};
@@ -49,15 +45,15 @@ impl VoterRegistration for VotingServer {
         let v = req.into_inner();
 
         match self.voters.entry(v.name.clone()) {
-            Entry::Occupied(_) => Ok(Response::new(Status { code: 1 })),
+            Entry::Occupied(_) => Ok(Response::new(Status::REGISTER_VOTER_EXISTED)),
             Entry::Vacant(e) => {
                 let Ok(ivoter) = InternalVoter::try_from(v) else {
                     eprintln!("Malformed public key");
-                    return Ok(Response::new(Status { code: 2 }));
+                    return Ok(Response::new(Status::REGISTER_VOTER_UNKNOWN));
                 };
                 e.insert(ivoter);
 
-                Ok(Response::new(Status { code: 0 }))
+                Ok(Response::new(Status::REGISTER_VOTER_SUCCESS))
             }
         }
     }
@@ -66,9 +62,9 @@ impl VoterRegistration for VotingServer {
         let n = req.into_inner();
 
         if self.voters.remove(&n.name).is_some() {
-            Ok(Response::new(Status { code: 0 }))
+            Ok(Response::new(Status::UNREGISTER_VOTER_SUCCESS))
         } else {
-            Ok(Response::new(Status { code: 1 }))
+            Ok(Response::new(Status::UNREGISTER_VOTER_NOTFOUND))
         }
     }
 }

@@ -1,7 +1,3 @@
-pub mod voting {
-    tonic::include_proto!("voting");
-}
-
 use std::{
     collections::HashMap,
     error::Error,
@@ -25,6 +21,8 @@ use voting::{
     e_voting_client::EVotingClient, voter_registration_client::VoterRegistrationClient,
     AuthRequest, Voter, VoterName,
 };
+
+pub mod voting;
 
 struct ClientVoter {
     name: String,
