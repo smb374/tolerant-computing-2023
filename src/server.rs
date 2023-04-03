@@ -6,11 +6,13 @@ use std::{
     error::Error,
     net::{IpAddr, SocketAddr},
     sync::Arc,
+    time::Duration,
 };
 
 use clap::Parser;
 use dashmap::{mapref::entry::Entry, DashMap};
 use ed25519_dalek::{Signature, Verifier};
+use tokio::time::MissedTickBehavior;
 use tonic::{transport::Server, Request, Response};
 
 use voting::{
@@ -24,7 +26,7 @@ mod internal_voter;
 mod token_manager;
 
 use internal_voter::InternalVoter;
-use token_manager::{VoterToken, TokenManager};
+use token_manager::{TokenManager, VoterToken};
 
 type RPCResult<T> = Result<Response<T>, tonic::Status>;
 
@@ -126,11 +128,9 @@ impl EVoting for VotingServer {
         let pubk = voter_entry.public_key();
 
         match pubk.verify(&msg, &sig) {
-            Ok(()) => {
-                Ok(Response::new(AuthToken {
-                    value: Vec::from(self.tokens.generate_token(voter_entry.name())),
-                }))
-            }
+            Ok(()) => Ok(Response::new(AuthToken {
+                value: Vec::from(self.tokens.generate_token(voter_entry.name())),
+            })),
             Err(e) => {
                 eprintln!("Challenge-Response failed: {}", e);
                 err_resp
@@ -170,11 +170,22 @@ struct Args {
     port: u16,
 }
 
+async fn cronjob_clean_token(server: Arc<VotingServer>) {
+    let mut interval = tokio::time::interval(Duration::from_secs(600));
+    interval.set_missed_tick_behavior(MissedTickBehavior::Delay);
+
+    loop {
+        interval.tick().await;
+        server.tokens.clean_expired_token();
+    }
+}
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
     let args = Args::parse();
     let addr = SocketAddr::from((args.host, args.port));
     let voting = Arc::new(VotingServer::default());
+    tokio::spawn(cronjob_clean_token(voting.clone()));
 
     Server::builder()
         .add_service(VoterRegistrationServer::from_arc(Arc::clone(&voting)))

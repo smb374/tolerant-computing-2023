@@ -19,13 +19,16 @@ impl TokenManager {
         auth_token
     }
 
-    pub fn get_token(&self, auth_token: &[u8]) -> Option<VoterToken> {
+    pub fn lookup_token(&self, auth_token: &[u8]) -> Option<VoterToken> {
         let dgst = Sha512::digest(auth_token);
         let digest = BASE64_STANDARD.encode(dgst.as_slice());
 
         self.inner.remove_if(&digest, |_, token| token.is_expired());
-
         self.inner.get(&digest).as_deref().cloned()
+    }
+
+    pub fn clean_expired_token(&self) {
+        self.inner.retain(|_k, v| !v.is_expired());
     }
 }
 

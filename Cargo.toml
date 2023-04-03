@@ -44,7 +44,7 @@ features = ["getrandom"]
 
 [dependencies.tokio]
 version = "1"
-features = ["macros", "rt-multi-thread"]
+features = ["macros", "rt-multi-thread", "time"]
 
 [build-dependencies]
 tonic-build = "0.8"
