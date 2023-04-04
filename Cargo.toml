@@ -23,12 +23,12 @@ path = "src/client.rs"
 [dependencies]
 base64 = "0.21"
 dashmap = "5.4"
-flume = "0.10"
 prost = "0.11"
 prost-types = "0.11"
 rustyline = "11.0"
 tonic = "0.8"
 chrono = "0.4.24"
+thiserror = "1.0.40"
 
 [dependencies.clap]
 version = "4.2"

@@ -60,6 +60,11 @@ impl VoterToken {
         &self.digest
     }
 
+    pub fn voter_name(&self) -> &str {
+        &self.voter
+    }
+
+    #[allow(dead_code)]
     pub fn expire(&self) -> DateTime<Utc> {
         self.expire
     }

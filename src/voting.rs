@@ -27,3 +27,14 @@ impl Status {
     pub const CAST_VOTE_NOTALLOW: Status = Status::new(3);
     pub const CAST_VOTE_CASTED: Status = Status::new(4);
 }
+
+impl ElectionResult {
+    pub const ELECTION_RESULT_NOTFOUND: ElectionResult = ElectionResult {
+        status: 1,
+        counts: Vec::new(),
+    };
+    pub const ELECTION_RESULT_ONGOING: ElectionResult = ElectionResult {
+        status: 2,
+        counts: Vec::new(),
+    };
+}

@@ -1,3 +1,6 @@
+#[macro_use]
+extern crate thiserror;
+
 use std::{
     error::Error,
     net::{IpAddr, SocketAddr},
@@ -17,10 +20,12 @@ use voting::{
     *,
 };
 
+mod internal_election;
 mod internal_voter;
 mod token_manager;
 pub mod voting;
 
+use internal_election::InternalElection;
 use internal_voter::InternalVoter;
 use token_manager::TokenManager;
 
@@ -32,6 +37,7 @@ struct VotingServer {
     // key: Name of the voter.
     // value: Internal voter representation.
     voters: DashMap<String, InternalVoter>,
+    elections: DashMap<String, InternalElection>,
     // tokens: See token_manager.rs
     tokens: TokenManager,
 }
@@ -131,14 +137,77 @@ impl EVoting for VotingServer {
         }
     }
 
-    async fn create_election(&self, _req: Request<Election>) -> RPCResult<Status> {
-        todo!()
+    async fn create_election(&self, req: Request<Election>) -> RPCResult<Status> {
+        let election = req.into_inner();
+
+        let Some(token) = self.tokens.lookup_token(&election.token.value) else {
+            return Ok(Response::new(Status::CREATE_ELECTION_AUTH));
+        };
+        let Some(_voter_entry) = self.voters.get(token.voter_name()) else {
+            return Ok(Response::new(Status::CREATE_ELECTION_AUTH));
+        };
+
+        if election.choices.is_empty() || election.groups.is_empty() {
+            return Ok(Response::new(Status::CREATE_ELECTION_INVALID));
+        }
+
+        let Ok(internal_election) = InternalElection::try_from(election) else {
+            return Ok(Response::new(Status::CREATE_ELECTION_UNKNOWN));
+        };
+
+        match self.elections.entry(internal_election.name().to_owned()) {
+            Entry::Occupied(_) => return Ok(Response::new(Status::CREATE_ELECTION_UNKNOWN)),
+            Entry::Vacant(e) => e.insert(internal_election),
+        };
+
+        return Ok(Response::new(Status::CREATE_ELECTION_SUCCESS));
     }
-    async fn cast_vote(&self, _req: Request<Vote>) -> RPCResult<Status> {
-        todo!()
+
+    async fn cast_vote(&self, req: Request<Vote>) -> RPCResult<Status> {
+        let vote_req = req.into_inner();
+
+        let Some(token) = self.tokens.lookup_token(&vote_req.token.value) else {
+            return Ok(Response::new(Status::CAST_VOTE_AUTH));
+        };
+        let Some(voter_entry) = self.voters.get(token.voter_name()) else {
+            return Ok(Response::new(Status::CAST_VOTE_AUTH));
+        };
+        let Some(mut election_entry) = self.elections.get_mut(&vote_req.election_name) else {
+            return Ok(Response::new(Status::CAST_VOTE_INVALID));
+        };
+
+        if let Err(e) = election_entry
+            .value_mut()
+            .vote(voter_entry.value(), &vote_req.choice_name)
+        {
+            Ok(Response::new(e.into()))
+        } else {
+            Ok(Response::new(Status::CAST_VOTE_SUCCESS))
+        }
     }
+
     async fn get_result(&self, req: Request<ElectionName>) -> RPCResult<ElectionResult> {
-        todo!()
+        let election_name = req.into_inner().name;
+
+        let Some(election_entry) = self.elections.get(&election_name) else {
+            return Ok(Response::new(ElectionResult::ELECTION_RESULT_NOTFOUND));
+        };
+        if !election_entry.value().is_ended() {
+            return Ok(Response::new(ElectionResult::ELECTION_RESULT_ONGOING));
+        }
+
+        let vote_counts: Vec<VoteCount> = election_entry
+            .results()
+            .map(|(choice, count)| VoteCount {
+                choice_name: choice.to_owned(),
+                count: count as i32,
+            })
+            .collect();
+
+        Ok(Response::new(ElectionResult {
+            status: 0,
+            counts: vote_counts,
+        }))
     }
 }
 
