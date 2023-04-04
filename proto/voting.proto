@@ -71,5 +71,5 @@ message VoteCount {
 
 message ElectionResult {
   required int32 status = 1;
-  required VoteCount count = 2;
+  repeated VoteCount counts = 2;
 }

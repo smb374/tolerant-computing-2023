@@ -138,19 +138,7 @@ impl EVoting for VotingServer {
         todo!()
     }
     async fn get_result(&self, req: Request<ElectionName>) -> RPCResult<ElectionResult> {
-        eprintln!(
-            "Request for election result of election <{}>",
-            req.get_ref().name
-        );
-        let vote_count = VoteCount {
-            choice_name: "Test".to_string(),
-            count: 999,
-        };
-        let result = ElectionResult {
-            status: 0,
-            count: vote_count,
-        };
-        Ok(Response::new(result))
+        todo!()
     }
 }
 
