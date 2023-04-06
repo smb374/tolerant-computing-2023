@@ -2,14 +2,17 @@ use std::{
     collections::HashMap,
     error::Error,
     net::{IpAddr, SocketAddr},
+    time::SystemTime,
 };
 
 use base64::prelude::{Engine, BASE64_STANDARD};
+use chrono::{DateTime, Local};
 use clap::{Command, FromArgMatches, Parser, Subcommand};
 use ed25519_dalek::{
     ed25519::signature::{Signature, SignerMut},
     Digest, Keypair, Sha512,
 };
+use prost_types::Timestamp;
 use rand_core::OsRng;
 use rustyline::{error::ReadlineError, DefaultEditor};
 use tonic::{
@@ -19,7 +22,7 @@ use tonic::{
 
 use voting::{
     e_voting_client::EVotingClient, voter_registration_client::VoterRegistrationClient,
-    AuthRequest, Voter, VoterName,
+    AuthRequest, AuthToken, Election, ElectionName, ElectionResult, Vote, Voter, VoterName,
 };
 
 pub mod voting;
@@ -69,6 +72,49 @@ enum Commands {
     #[command(about = "List various states of the client.")]
     #[command(subcommand)]
     List(List),
+    #[command(about = "Create an election.")]
+    Create {
+        #[arg(help = "Name of the election.")]
+        name: String,
+        #[arg(short = 'u', long, help = "User to create the election.")]
+        user: String,
+        #[arg(
+            short = 'g',
+            long,
+            num_args = 1..,
+            value_delimiter = ' ',
+            help = "Groups eligable to elect, separated by space. E.g.: -g A B C"
+        )]
+        groups: Vec<String>,
+        #[arg(
+            short = 'c',
+            long,
+            num_args = 1..,
+            value_delimiter = ' ',
+            help = "Choices of the election, separated by space. E.g.: -c X Y Z"
+        )]
+        choices: Vec<String>,
+        #[arg(
+            short = 'd',
+            long,
+            help = "End date of the election. E.g.: 2023-05-01T00:00:00Z"
+        )]
+        date: DateTime<Local>,
+    },
+    #[command(about = "Vote to an election.")]
+    Vote {
+        #[arg(help = "Name of the election.")]
+        election: String,
+        #[arg(short = 'c', long, help = "The choice.")]
+        choice: String,
+        #[arg(short = 'u', long, help = "User to vote the election.")]
+        user: String,
+    },
+    #[command(about = "Election result.")]
+    Result {
+        #[arg(help = "Name of the election.")]
+        election: String,
+    },
     #[command(about = "Exit shell.")]
     Exit,
 }
@@ -180,6 +226,88 @@ impl VotingClient {
                 self.cleanup().await?;
                 return Ok(true);
             }
+            Commands::Create {
+                name,
+                user,
+                groups,
+                choices,
+                date,
+            } => {
+                let ts: Timestamp = Timestamp::from(SystemTime::from(date));
+                let Some(cv) = self.user_map.get(&user) else {
+                        println!("No such user.");
+                        return Ok(false);
+                    };
+                let Some(tok) = cv.token.as_ref() else {
+                        println!("User not authenticated.");
+                        return Ok(false);
+                    };
+                let election = Election {
+                    name,
+                    groups,
+                    choices,
+                    end_date: ts,
+                    token: AuthToken { value: tok.clone() },
+                };
+                let status = self.evoting.create_election(election).await?.into_inner();
+                match status.code {
+                    0 => println!("Success."),
+                    1 => println!("Invalid authentication token."),
+                    2 => println!("Missing group or choices."),
+                    3 => println!("Unknown server error."),
+                    _ => unreachable!(),
+                }
+            }
+            Commands::Vote {
+                election,
+                choice,
+                user,
+            } => {
+                let Some(cv) = self.user_map.get(&user) else {
+                        println!("No such user.");
+                        return Ok(false);
+                    };
+                let Some(tok) = cv.token.as_ref() else {
+                        println!("User not authenticated.");
+                        return Ok(false);
+                    };
+                let vote = Vote {
+                    election_name: election,
+                    choice_name: choice,
+                    token: AuthToken { value: tok.clone() },
+                };
+                let status = self
+                    .evoting
+                    .cast_vote(Request::new(vote))
+                    .await?
+                    .into_inner();
+                match status.code {
+                    0 => println!("Success."),
+                    1 => println!("Invalid authentication token."),
+                    2 => println!("Invalid election name."),
+                    3 => println!("User group denied for the election."),
+                    4 => println!("No second vote!"),
+                    _ => unreachable!(),
+                }
+            }
+            Commands::Result { election } => {
+                let en = ElectionName { name: election };
+                let result: ElectionResult = self
+                    .evoting
+                    .get_result(Request::new(en))
+                    .await?
+                    .into_inner();
+                match result.status {
+                    0 => {
+                        for vc in result.counts {
+                            println!("{}:\t{}", vc.choice_name, vc.count);
+                        }
+                    }
+                    1 => println!("Election not exists."),
+                    2 => println!("Election hasn't stop, wait till the end."),
+                    _ => unreachable!(),
+                }
+            }
         }
         Ok(false)
     }
@@ -256,8 +384,8 @@ fn shell() -> Command {
         .multicall(true)
         .arg_required_else_help(true)
         .subcommand_required(true)
-        .subcommand_value_name("APPLET")
-        .subcommand_help_heading("APPLETS")
+        .subcommand_value_name("COMMAND")
+        .subcommand_help_heading("COMMANDS")
         .help_template(PARSER_TEMPLATE);
 
     Commands::augment_subcommands(cli)
