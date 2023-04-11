@@ -223,6 +223,8 @@ struct Args {
 async fn cronjob_clean_token(server: Arc<VotingServer>) {
     let mut interval = tokio::time::interval(Duration::from_secs(600));
     interval.set_missed_tick_behavior(MissedTickBehavior::Delay);
+    // Consume the first immediate tick.
+    interval.tick().await;
 
     loop {
         interval.tick().await;
