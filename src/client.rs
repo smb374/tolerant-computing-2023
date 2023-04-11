@@ -1,8 +1,10 @@
 use std::{
     collections::HashMap,
     error::Error,
+    ffi::OsString,
     net::{IpAddr, SocketAddr},
-    time::SystemTime,
+    str::FromStr,
+    time::{Duration, SystemTime},
 };
 
 use base64::prelude::{Engine, BASE64_STANDARD};
@@ -82,24 +84,24 @@ enum Commands {
             short = 'g',
             long,
             num_args = 1..,
-            value_delimiter = ' ',
-            help = "Groups eligable to elect, separated by space. E.g.: -g A B C"
+            value_delimiter = ',',
+            help = "Groups eligable to elect, separated by space. E.g.: -g A,B,C"
         )]
         groups: Vec<String>,
         #[arg(
             short = 'c',
             long,
             num_args = 1..,
-            value_delimiter = ' ',
-            help = "Choices of the election, separated by space. E.g.: -c X Y Z"
+            value_delimiter = ',',
+            help = "Choices of the election, separated by space. E.g.: -c X,Y,Z"
         )]
         choices: Vec<String>,
         #[arg(
-            short = 'd',
+            short = 'e',
             long,
-            help = "End date of the election. E.g.: 2023-05-01T00:00:00Z"
+            help = "End timestamp or duration of the election. E.g. 2023-05-01T00:00:00Z, 1h."
         )]
-        date: DateTime<Local>,
+        end: EndDate,
     },
     #[command(about = "Vote to an election.")]
     Vote {
@@ -117,6 +119,46 @@ enum Commands {
     },
     #[command(about = "Exit shell.")]
     Exit,
+}
+
+#[derive(Clone, PartialEq, Debug)]
+enum EndDate {
+    Timestamp(Timestamp),
+    Duration(Duration),
+    Malformed(String),
+}
+
+impl From<OsString> for EndDate {
+    fn from(value: OsString) -> Self {
+        let val_st = value.to_string_lossy();
+        if let Ok(dt) = DateTime::<Local>::from_str(&val_st) {
+            let syst = SystemTime::from(dt);
+            EndDate::Timestamp(Timestamp::from(syst))
+        } else if let Ok(ds) = duration_str::parse(&val_st) {
+            EndDate::Duration(ds)
+        } else {
+            EndDate::Malformed(val_st.to_string())
+        }
+    }
+}
+
+#[derive(thiserror::Error, Debug)]
+#[error("Malformed timestamp or duration: {0}")]
+struct MalformedEndDateError(String);
+
+impl TryInto<Timestamp> for EndDate {
+    type Error = MalformedEndDateError;
+    fn try_into(self) -> Result<Timestamp, Self::Error> {
+        match self {
+            EndDate::Timestamp(ts) => Ok(ts),
+            EndDate::Duration(dur) => {
+                let t = SystemTime::now();
+                let ts: Timestamp = Timestamp::from(t + dur);
+                Ok(ts)
+            }
+            EndDate::Malformed(t) => Err(MalformedEndDateError(t)),
+        }
+    }
 }
 
 #[derive(Subcommand, Debug)]
@@ -231,9 +273,15 @@ impl VotingClient {
                 user,
                 groups,
                 choices,
-                date,
+                end,
             } => {
-                let ts: Timestamp = Timestamp::from(SystemTime::from(date));
+                let ts = match end.try_into() {
+                    Ok(t) => t,
+                    Err(e) => {
+                        println!("Error converting end: {}", e);
+                        return Ok(false);
+                    }
+                };
                 let Some(cv) = self.user_map.get(&user) else {
                         println!("No such user.");
                         return Ok(false);

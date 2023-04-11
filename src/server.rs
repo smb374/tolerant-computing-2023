@@ -46,7 +46,7 @@ struct VotingServer {
 
 #[tonic::async_trait]
 impl VoterRegistration for VotingServer {
-    #[tracing::instrument]
+    #[tracing::instrument(skip_all)]
     async fn register_voter(&self, req: Request<Voter>) -> RPCResult<Status> {
         let v = req.into_inner();
 
@@ -64,7 +64,7 @@ impl VoterRegistration for VotingServer {
         }
     }
 
-    #[tracing::instrument]
+    #[tracing::instrument(skip_all)]
     async fn unregister_voter(&self, req: Request<VoterName>) -> RPCResult<Status> {
         let n = req.into_inner();
 
@@ -84,7 +84,7 @@ impl EVoting for VotingServer {
     ///
     /// The function will return a challenge with 0s when the user request a challenge-response is
     /// not registered before, as the spec nor the protocol definition specify the error handling.
-    #[tracing::instrument]
+    #[tracing::instrument(skip_all)]
     async fn pre_auth(&self, req: Request<VoterName>) -> RPCResult<Challenge> {
         let n = req.into_inner();
         if let Some(v) = self.voters.get_mut(&n.name).as_mut() {
@@ -111,7 +111,7 @@ impl EVoting for VotingServer {
     /// Same as pre_auth, since there's no error handling spec, the function will return a token
     /// with 0s to show an error occurred, including: No Such User, Invalid Signature, Signature
     /// Verification failed.
-    #[tracing::instrument]
+    #[tracing::instrument(skip_all)]
     async fn auth(&self, req: Request<AuthRequest>) -> RPCResult<AuthToken> {
         let auth_req = req.into_inner();
         let name = &auth_req.name.name;
@@ -153,7 +153,7 @@ impl EVoting for VotingServer {
         }
     }
 
-    #[tracing::instrument]
+    #[tracing::instrument(skip_all)]
     async fn create_election(&self, req: Request<Election>) -> RPCResult<Status> {
         let election = req.into_inner();
 
@@ -183,7 +183,7 @@ impl EVoting for VotingServer {
         return Ok(Response::new(Status::CREATE_ELECTION_SUCCESS));
     }
 
-    #[tracing::instrument]
+    #[tracing::instrument(skip_all)]
     async fn cast_vote(&self, req: Request<Vote>) -> RPCResult<Status> {
         let vote_req = req.into_inner();
 
@@ -207,7 +207,7 @@ impl EVoting for VotingServer {
         }
     }
 
-    #[tracing::instrument]
+    #[tracing::instrument(skip_all)]
     async fn get_result(&self, req: Request<ElectionName>) -> RPCResult<ElectionResult> {
         let election_name = req.into_inner().name;
 
