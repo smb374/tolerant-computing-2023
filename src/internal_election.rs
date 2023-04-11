@@ -55,7 +55,7 @@ impl InternalElection {
             return Err(VoteError::InvalidElection);
         };
 
-        if !self.voted.insert(voter.name().to_owned()) {
+        if self.voted.insert(voter.name().to_owned()) {
             *vote_count += 1;
             Ok(())
         } else {
