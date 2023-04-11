@@ -384,6 +384,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let mut client = VotingClient::new(args).await?;
 
     let mut rl = DefaultEditor::new()?;
+    let _ = rl.load_history(".history");
 
     loop {
         let line = rl.readline("$> ");
@@ -420,6 +421,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
             }
         }
     }
+    rl.save_history(".history")?;
     Ok(())
 }
 

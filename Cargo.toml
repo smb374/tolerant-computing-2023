@@ -25,7 +25,6 @@ base64 = "0.21"
 dashmap = "5.4"
 prost = "0.11"
 prost-types = "0.11"
-rustyline = "11.0"
 tonic = "0.8"
 chrono = "0.4.24"
 thiserror = "1.0.40"
@@ -47,6 +46,10 @@ features = ["rand_core"]
 [dependencies.rand_core]
 version = "0.5"
 features = ["getrandom"]
+
+[dependencies.rustyline]
+version = "11.0"
+features = ["with-file-history"]
 
 [dependencies.tokio]
 version = "1"

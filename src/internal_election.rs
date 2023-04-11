@@ -43,7 +43,7 @@ impl InternalElection {
         self.end_date
     }
 
-    #[tracing::instrument]
+    #[tracing::instrument(skip_all)]
     pub fn vote(&mut self, voter: &InternalVoter, choice: &str) -> Result<(), VoteError> {
         if !self.is_qualified_group(voter.group()) {
             return Err(VoteError::GroupNotAllow);
@@ -58,7 +58,10 @@ impl InternalElection {
 
         if self.voted.insert(voter.name().to_owned()) {
             *vote_count += 1;
-            info!("A successful cast on {election_name}", election_name = self.name());
+            info!(
+                "A successful cast on {election_name}",
+                election_name = self.name()
+            );
             Ok(())
         } else {
             // Already casted if `.insert()` return false
