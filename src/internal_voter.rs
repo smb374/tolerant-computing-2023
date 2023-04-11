@@ -31,6 +31,7 @@ impl TryFrom<Voter> for InternalVoter {
 }
 
 impl InternalVoter {
+    #[tracing::instrument]
     pub fn generate_challenge(&mut self) -> &[u8; 128] {
         let mut buf: [u8; 128] = [0; 128];
         OsRng.fill_bytes(&mut buf);

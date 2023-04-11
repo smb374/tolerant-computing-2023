@@ -1,5 +1,7 @@
 #[macro_use]
 extern crate thiserror;
+#[macro_use]
+extern crate tracing;
 
 use std::{
     error::Error,
@@ -44,6 +46,7 @@ struct VotingServer {
 
 #[tonic::async_trait]
 impl VoterRegistration for VotingServer {
+    #[tracing::instrument]
     async fn register_voter(&self, req: Request<Voter>) -> RPCResult<Status> {
         let v = req.into_inner();
 
@@ -51,7 +54,7 @@ impl VoterRegistration for VotingServer {
             Entry::Occupied(_) => Ok(Response::new(Status::REGISTER_VOTER_EXISTED)),
             Entry::Vacant(e) => {
                 let Ok(ivoter) = InternalVoter::try_from(v) else {
-                    eprintln!("Malformed public key");
+                    info!("Malformed public key");
                     return Ok(Response::new(Status::REGISTER_VOTER_UNKNOWN));
                 };
                 e.insert(ivoter);
@@ -61,6 +64,7 @@ impl VoterRegistration for VotingServer {
         }
     }
 
+    #[tracing::instrument]
     async fn unregister_voter(&self, req: Request<VoterName>) -> RPCResult<Status> {
         let n = req.into_inner();
 
@@ -80,6 +84,7 @@ impl EVoting for VotingServer {
     ///
     /// The function will return a challenge with 0s when the user request a challenge-response is
     /// not registered before, as the spec nor the protocol definition specify the error handling.
+    #[tracing::instrument]
     async fn pre_auth(&self, req: Request<VoterName>) -> RPCResult<Challenge> {
         let n = req.into_inner();
         if let Some(v) = self.voters.get_mut(&n.name).as_mut() {
@@ -106,6 +111,7 @@ impl EVoting for VotingServer {
     /// Same as pre_auth, since there's no error handling spec, the function will return a token
     /// with 0s to show an error occurred, including: No Such User, Invalid Signature, Signature
     /// Verification failed.
+    #[tracing::instrument]
     async fn auth(&self, req: Request<AuthRequest>) -> RPCResult<AuthToken> {
         let auth_req = req.into_inner();
         let name = &auth_req.name.name;
@@ -114,29 +120,40 @@ impl EVoting for VotingServer {
         }));
 
         let Some(mut voter_entry) = self.voters.get_mut(name) else {
-            eprintln!("No such voter or challenge.");
+            info!("No such voter or challenge.");
             return err_resp;
         };
         let (Ok(sig), Some(msg)) = (
             Signature::from_bytes(&auth_req.response.value),
             voter_entry.take_challenge(),
         ) else {
-            eprintln!("Invalid Signature.");
+            warn!("Invalid Signature.");
             return err_resp;
         };
         let pubk = voter_entry.public_key();
 
         match pubk.verify(&msg, &sig) {
-            Ok(()) => Ok(Response::new(AuthToken {
-                value: Vec::from(self.tokens.generate_token(voter_entry.name())),
-            })),
+            Ok(()) => {
+                info!(
+                    "Successful authentication of {voter}",
+                    voter = voter_entry.name(),
+                );
+                Ok(Response::new(AuthToken {
+                    value: Vec::from(self.tokens.generate_token(voter_entry.name())),
+                }))
+            }
             Err(e) => {
-                eprintln!("Challenge-Response failed: {}", e);
+                error!(
+                    "Challenge-Response failed for {voter}: {error}",
+                    voter = voter_entry.name(),
+                    error = e
+                );
                 err_resp
             }
         }
     }
 
+    #[tracing::instrument]
     async fn create_election(&self, req: Request<Election>) -> RPCResult<Status> {
         let election = req.into_inner();
 
@@ -157,12 +174,16 @@ impl EVoting for VotingServer {
 
         match self.elections.entry(internal_election.name().to_owned()) {
             Entry::Occupied(_) => return Ok(Response::new(Status::CREATE_ELECTION_UNKNOWN)),
-            Entry::Vacant(e) => e.insert(internal_election),
+            Entry::Vacant(e) => {
+                let entry = e.insert(internal_election);
+                info!("Created election: {election:?}", election = entry.value());
+            }
         };
 
         return Ok(Response::new(Status::CREATE_ELECTION_SUCCESS));
     }
 
+    #[tracing::instrument]
     async fn cast_vote(&self, req: Request<Vote>) -> RPCResult<Status> {
         let vote_req = req.into_inner();
 
@@ -186,6 +207,7 @@ impl EVoting for VotingServer {
         }
     }
 
+    #[tracing::instrument]
     async fn get_result(&self, req: Request<ElectionName>) -> RPCResult<ElectionResult> {
         let election_name = req.into_inner().name;
 
@@ -228,6 +250,7 @@ async fn cronjob_clean_token(server: Arc<VotingServer>) {
 
     loop {
         interval.tick().await;
+        info!("Cleaning expired tokens");
         server.tokens.clean_expired_token();
     }
 }
@@ -235,10 +258,13 @@ async fn cronjob_clean_token(server: Arc<VotingServer>) {
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
     let args = Args::parse();
+    tracing_subscriber::fmt::init();
+
     let addr = SocketAddr::from((args.host, args.port));
     let voting = Arc::new(VotingServer::default());
     tokio::spawn(cronjob_clean_token(voting.clone()));
 
+    info!("Starting server listening on {addr}");
     Server::builder()
         .add_service(VoterRegistrationServer::from_arc(Arc::clone(&voting)))
         .add_service(EVotingServer::from_arc(Arc::clone(&voting)))

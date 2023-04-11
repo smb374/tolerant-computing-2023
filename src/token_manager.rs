@@ -27,6 +27,7 @@ impl TokenManager {
         self.inner.get(&digest).as_deref().cloned()
     }
 
+    #[tracing::instrument]
     pub fn clean_expired_token(&self) {
         self.inner.retain(|_k, v| !v.is_expired());
     }
@@ -40,6 +41,7 @@ pub struct VoterToken {
 }
 
 impl VoterToken {
+    #[tracing::instrument]
     pub fn generate(voter_name: &str) -> (Self, AuthToken) {
         let mut auth_token = [0u8; 128];
         OsRng.fill_bytes(&mut auth_token);
