@@ -1,4 +1,4 @@
-use crate::voting::Voter;
+use crate::proto::Voter;
 use ed25519_dalek::{PublicKey, SignatureError};
 use rand_core::{OsRng, RngCore};
 

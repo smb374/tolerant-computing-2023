@@ -16,19 +16,17 @@ use ed25519_dalek::{Signature, Verifier};
 use tokio::time::MissedTickBehavior;
 use tonic::{transport::Server, Request, Response};
 
-use voting::{
+use proto::{
     e_voting_server::{EVoting, EVotingServer},
     voter_registration_server::{VoterRegistration, VoterRegistrationServer},
     *,
 };
 
-mod internal_election;
-mod internal_voter;
 mod token_manager;
-pub mod voting;
+mod models;
+pub mod proto;
 
-use internal_election::InternalElection;
-use internal_voter::InternalVoter;
+use models::{InternalElection, InternalVoter};
 use token_manager::TokenManager;
 
 type RPCResult<T> = Result<Response<T>, tonic::Status>;

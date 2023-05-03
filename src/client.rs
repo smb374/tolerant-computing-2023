@@ -22,12 +22,12 @@ use tonic::{
     Request,
 };
 
-use voting::{
+use proto::{
     e_voting_client::EVotingClient, voter_registration_client::VoterRegistrationClient,
     AuthRequest, AuthToken, Election, ElectionName, ElectionResult, Vote, Voter, VoterName,
 };
 
-pub mod voting;
+pub mod proto;
 
 struct ClientVoter {
     name: String,
@@ -236,7 +236,7 @@ impl VotingClient {
                             .evoting
                             .auth(Request::new(AuthRequest {
                                 name: VoterName { name: name.clone() },
-                                response: voting::Response { value: response },
+                                response: proto::Response { value: response },
                             }))
                             .await?;
                         let token = auth_resp.get_ref().value.as_slice();

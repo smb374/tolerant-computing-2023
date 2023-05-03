@@ -1,6 +1,6 @@
+use super::InternalVoter;
 use crate::{
-    internal_voter::InternalVoter,
-    voting::{Election, Status},
+    proto::{Election, Status},
 };
 use chrono::{DateTime, NaiveDateTime, TimeZone, Utc};
 use std::collections::{HashMap, HashSet};
