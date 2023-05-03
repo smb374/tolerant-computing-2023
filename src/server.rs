@@ -10,7 +10,12 @@ use std::{
     time::Duration,
 };
 
+use ::config::{Environment, File as ConfigFile};
 use clap::Parser;
+use crate::args::ServerArgs;
+
+use self::config::ServerConfig;
+use couch_rs::Client;
 use dashmap::{mapref::entry::Entry, DashMap};
 use ed25519_dalek::{Signature, Verifier};
 use tokio::time::MissedTickBehavior;
@@ -22,9 +27,11 @@ use proto::{
     *,
 };
 
-mod token_manager;
+mod args;
+mod config;
 mod models;
 pub mod proto;
+mod token_manager;
 
 use models::{InternalElection, InternalVoter};
 use token_manager::TokenManager;
@@ -231,15 +238,6 @@ impl EVoting for VotingServer {
     }
 }
 
-#[derive(Parser, Debug)]
-#[command(author, version, about, long_about = None)]
-struct Args {
-    #[arg(short = 'H', long)]
-    host: IpAddr,
-    #[arg(short, long, default_value_t = 50001)]
-    port: u16,
-}
-
 async fn cronjob_clean_token(server: Arc<VotingServer>) {
     let mut interval = tokio::time::interval(Duration::from_secs(600));
     interval.set_missed_tick_behavior(MissedTickBehavior::Delay);
@@ -255,10 +253,29 @@ async fn cronjob_clean_token(server: Arc<VotingServer>) {
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
-    let args = Args::parse();
     tracing_subscriber::fmt::init();
+    let args = ServerArgs::parse();
 
-    let addr = SocketAddr::from((args.host, args.port));
+    let mut cfg: ServerConfig = ::config::Config::builder()
+        .add_source(ConfigFile::with_name(&args.config).required(false))
+        .add_source(Environment::with_prefix("VOTING").separator("."))
+        .build()?
+        .try_deserialize()?;
+    cfg.merge_from_args(&args);
+
+    info!("Configuration loaded");
+
+    debug!("Trying to connect to database: {}", &cfg.database.uri);
+    let client = Client::new_with_timeout(
+        &cfg.database.uri,
+        cfg.database.username.as_deref(),
+        cfg.database.password.as_deref(),
+        cfg.database.timeout,
+    )?;
+    let dbstatus = client.check_status().await?;
+    info!("Connected to database: {:?}", &dbstatus);
+
+    let addr = SocketAddr::from((cfg.host, cfg.port));
     let voting = Arc::new(VotingServer::default());
     tokio::spawn(cronjob_clean_token(voting.clone()));
 

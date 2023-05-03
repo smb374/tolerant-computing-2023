@@ -2209,6 +2209,7 @@ dependencies = [
  "prost-types",
  "rand_core 0.5.1",
  "rustyline",
+ "serde",
  "thiserror",
  "tokio",
  "tonic",
