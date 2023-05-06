@@ -203,7 +203,7 @@ impl VotingClient {
                 let req = Request::new(Voter {
                     name: cv.name.clone(),
                     group: cv.group.clone(),
-                    public_key: Vec::from_iter(cv.key_pair.public.as_bytes().clone().into_iter()),
+                    public_key: Vec::from(*cv.key_pair.public.as_bytes()),
                 });
                 let resp = self.registeration.register_voter(req).await?;
                 if resp.get_ref().code == 0 {
@@ -230,8 +230,8 @@ impl VotingClient {
                         .pre_auth(Request::new(VoterName { name: name.clone() }))
                         .await?;
                     let challenge = ch_resp.get_ref().value.as_slice();
-                    if challenge != &[0u8; 128] {
-                        let response = cv.key_pair.sign(&challenge).as_bytes().to_vec();
+                    if challenge != [0u8; 128] {
+                        let response = cv.key_pair.sign(challenge).as_bytes().to_vec();
                         let auth_resp = self
                             .evoting
                             .auth(Request::new(AuthRequest {
@@ -240,7 +240,7 @@ impl VotingClient {
                             }))
                             .await?;
                         let token = auth_resp.get_ref().value.as_slice();
-                        if token != &[0u8; 128] {
+                        if token != [0u8; 128] {
                             println!("Authentication success.");
                             cv.token.replace(token.to_vec());
                         }
@@ -260,7 +260,7 @@ impl VotingClient {
                         println!("group: {}", v.group);
                         println!("public key: sha512:{}", pubk);
                         println!("auth token: sha512:{}", token);
-                        print!("\n");
+                        println!();
                     });
                 }
             },
