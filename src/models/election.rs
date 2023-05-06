@@ -4,9 +4,15 @@ use crate::{
 };
 use chrono::{DateTime, NaiveDateTime, TimeZone, Utc};
 use std::collections::{HashMap, HashSet};
+use couch_rs::{CouchDocument, document::TypedCouchDocument};
 
-#[derive(Debug)]
+#[serde_as]
+#[derive(Clone, Debug, Serialize, Deserialize, CouchDocument)]
 pub struct InternalElection {
+    #[serde(skip_serializing_if = "String::is_empty")]
+    _id: String,
+    #[serde(skip_serializing_if = "String::is_empty")]
+    _rev: String,
     name: String,
     groups: HashSet<String>,
     votes: HashMap<String, u64>,
@@ -84,6 +90,8 @@ impl TryFrom<Election> for InternalElection {
 
     fn try_from(election: Election) -> Result<Self, Self::Error> {
         Ok(Self {
+            _id: String::default(),
+            _rev: String::default(),
             name: election.name,
             groups: HashSet::from_iter(election.groups.into_iter()),
             votes: HashMap::from_iter(election.choices.into_iter().map(|choice| (choice, 0))),

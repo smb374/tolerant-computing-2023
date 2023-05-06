@@ -2,11 +2,16 @@ use base64::prelude::*;
 use chrono::{DateTime, Utc, Duration};
 use ed25519_dalek::{Sha512, Digest};
 use rand_core::{OsRng, RngCore};
+use couch_rs::{CouchDocument, document::TypedCouchDocument};
 
 pub type AuthToken = [u8; 128];
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize, CouchDocument)]
 pub struct VoterToken {
+    #[serde(skip_serializing_if = "String::is_empty")]
+    _id: String,
+    #[serde(skip_serializing_if = "String::is_empty")]
+    _rev: String,
     digest: String,
     voter: String,
     expire: DateTime<Utc>,
@@ -22,6 +27,8 @@ impl VoterToken {
 
         (
             Self {
+                _id: String::default(),
+                _rev: String::default(),
                 digest,
                 voter: voter_name.to_owned(),
                 expire: Utc::now() + Duration::hours(1),

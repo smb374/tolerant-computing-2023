@@ -1,52 +1,51 @@
 #[macro_use]
+extern crate serde;
+#[macro_use]
+extern crate serde_json;
+#[macro_use]
+extern crate serde_with;
+#[macro_use]
 extern crate thiserror;
 #[macro_use]
 extern crate tracing;
 
-use std::{
-    error::Error,
-    net::{IpAddr, SocketAddr},
-    sync::Arc,
-    time::Duration,
-};
-
+use self::config::ServerConfig;
+use crate::args::ServerArgs;
 use ::config::{Environment, File as ConfigFile};
 use clap::Parser;
-use crate::args::ServerArgs;
-
-use self::config::ServerConfig;
 use couch_rs::Client as CouchClient;
-use dashmap::{mapref::entry::Entry, DashMap};
-use ed25519_dalek::{Signature, Verifier};
+use std::{error::Error, net::SocketAddr, sync::Arc, time::Duration};
 use tokio::time::MissedTickBehavior;
 use tonic::{transport::Server, Request, Response};
 
+mod args;
+mod config;
+mod controllers;
+mod models;
+pub mod proto;
+
+use controllers::{ElectionController, TokenController, VoterController};
+use models::{InternalElection, InternalVoter};
 use proto::{
     e_voting_server::{EVoting, EVotingServer},
     voter_registration_server::{VoterRegistration, VoterRegistrationServer},
     *,
 };
 
-mod args;
-mod config;
-mod models;
-pub mod proto;
-mod token_manager;
-
-use models::{InternalElection, InternalVoter};
-use token_manager::TokenManager;
-
 type RPCResult<T> = Result<Response<T>, tonic::Status>;
 
-#[derive(Debug, Default)]
+#[derive(Clone, Debug)]
 struct VotingServer {
-    // voters: A map that stores the voters that is registered.
-    // key: Name of the voter.
-    // value: Internal voter representation.
-    voters: DashMap<String, InternalVoter>,
-    elections: DashMap<String, InternalElection>,
-    // tokens: See token_manager.rs
-    tokens: TokenManager,
+    dbconn: CouchClient,
+    // // voters: A map that stores the voters that is registered.
+    // // key: Name of the voter.
+    // // value: Internal voter representation.
+    // voters: DashMap<String, InternalVoter>,
+    // elections: DashMap<String, InternalElection>,
+    // // tokens: See token_manager.rs
+    elections: ElectionController,
+    voters: VoterController,
+    tokens: TokenController,
 }
 
 #[tonic::async_trait]
@@ -55,17 +54,15 @@ impl VoterRegistration for VotingServer {
     async fn register_voter(&self, req: Request<Voter>) -> RPCResult<Status> {
         let v = req.into_inner();
 
-        match self.voters.entry(v.name.clone()) {
-            Entry::Occupied(_) => Ok(Response::new(Status::REGISTER_VOTER_EXISTED)),
-            Entry::Vacant(e) => {
-                let Ok(ivoter) = InternalVoter::try_from(v) else {
-                    info!("Malformed public key");
-                    return Ok(Response::new(Status::REGISTER_VOTER_UNKNOWN));
-                };
-                e.insert(ivoter);
+        let Ok(mut ivoter) = InternalVoter::try_from(v) else {
+            info!("Malformed public key");
+            return Ok(Response::new(Status::REGISTER_VOTER_UNKNOWN));
+        };
 
-                Ok(Response::new(Status::REGISTER_VOTER_SUCCESS))
-            }
+        match self.voters.register(&mut ivoter).await {
+            Ok(true) => Ok(Response::new(Status::REGISTER_VOTER_SUCCESS)),
+            Ok(false) => Ok(Response::new(Status::REGISTER_VOTER_EXISTED)),
+            Err(_) => Ok(Response::new(Status::REGISTER_VOTER_UNKNOWN)),
         }
     }
 
@@ -73,10 +70,10 @@ impl VoterRegistration for VotingServer {
     async fn unregister_voter(&self, req: Request<VoterName>) -> RPCResult<Status> {
         let n = req.into_inner();
 
-        if self.voters.remove(&n.name).is_some() {
-            Ok(Response::new(Status::UNREGISTER_VOTER_SUCCESS))
-        } else {
-            Ok(Response::new(Status::UNREGISTER_VOTER_NOTFOUND))
+        match self.voters.unregister(&n.name).await {
+            Ok(true) => Ok(Response::new(Status::UNREGISTER_VOTER_SUCCESS)),
+            Ok(false) => Ok(Response::new(Status::UNREGISTER_VOTER_NOTFOUND)),
+            Err(_) => Ok(Response::new(Status::UNREGISTER_VOTER_UNKNOWN)),
         }
     }
 }
@@ -92,14 +89,18 @@ impl EVoting for VotingServer {
     #[tracing::instrument(skip_all)]
     async fn pre_auth(&self, req: Request<VoterName>) -> RPCResult<Challenge> {
         let n = req.into_inner();
-        if let Some(v) = self.voters.get_mut(&n.name).as_mut() {
-            Ok(Response::new(Challenge {
-                value: Vec::from(v.generate_challenge().as_slice()),
-            }))
-        } else {
-            Ok(Response::new(Challenge {
+        match self.voters.find_user_by_name(&n.name).await {
+            Ok(Some(voter)) => {
+                let chal = self.voters.generate_challenge(&voter);
+
+                Ok(Response::new(Challenge {
+                    value: Vec::from(chal.as_slice()),
+                }))
+            }
+            // Error occurred or user not found
+            _ => Ok(Response::new(Challenge {
                 value: vec![0; 128],
-            }))
+            })),
         }
     }
     /// Auth stage for challenge-response protocol.
@@ -119,96 +120,91 @@ impl EVoting for VotingServer {
     #[tracing::instrument(skip_all)]
     async fn auth(&self, req: Request<AuthRequest>) -> RPCResult<AuthToken> {
         let auth_req = req.into_inner();
-        let name = &auth_req.name.name;
-        let err_resp = Ok(Response::new(AuthToken {
+        let err_resp = Response::new(AuthToken {
             value: vec![0; 128],
-        }));
+        });
+        let name = &auth_req.name.name;
+        let chal = auth_req.response.value.as_slice();
 
-        let Some(mut voter_entry) = self.voters.get_mut(name) else {
-            info!("No such voter or challenge.");
-            return err_resp;
-        };
-        let (Ok(sig), Some(msg)) = (
-            Signature::from_bytes(&auth_req.response.value),
-            voter_entry.take_challenge(),
-        ) else {
-            warn!("Invalid Signature.");
-            return err_resp;
-        };
-        let pubk = voter_entry.public_key();
-
-        match pubk.verify(&msg, &sig) {
-            Ok(()) => {
-                info!(
-                    "Successful authentication of {voter}",
-                    voter = voter_entry.name(),
-                );
-                Ok(Response::new(AuthToken {
-                    value: Vec::from(self.tokens.generate_token(voter_entry.name())),
-                }))
-            }
+        let auth_result = match self.voters.auth(name, chal).await {
+            Ok(v) => v,
             Err(e) => {
                 error!(
                     "Challenge-Response failed for {voter}: {error}",
-                    voter = voter_entry.name(),
+                    voter = name,
                     error = e
                 );
-                err_resp
+                return Ok(err_resp);
             }
+        };
+
+        if auth_result {
+            info!("Successful authentication of {voter}", voter = name);
+            if let Ok(token) = self.tokens.generate_token(name).await {
+                Ok(Response::new(AuthToken {
+                    value: token.to_vec(),
+                }))
+            } else {
+                Ok(err_resp)
+            }
+        } else {
+            Ok(err_resp)
         }
     }
 
     #[tracing::instrument(skip_all)]
     async fn create_election(&self, req: Request<Election>) -> RPCResult<Status> {
-        let election = req.into_inner();
+        let election_req = req.into_inner();
 
-        let Some(token) = self.tokens.lookup_token(&election.token.value) else {
+        let Some(token) = self.tokens.lookup_token(&election_req.token.value).await else {
             return Ok(Response::new(Status::CREATE_ELECTION_AUTH));
         };
-        let Some(_voter_entry) = self.voters.get(token.voter_name()) else {
+        let Ok(Some(_voter)) = self.voters.find_user_by_name(token.voter_name()).await else {
             return Ok(Response::new(Status::CREATE_ELECTION_AUTH));
         };
-
-        if election.choices.is_empty() || election.groups.is_empty() {
+        if election_req.choices.is_empty() || election_req.groups.is_empty() {
             return Ok(Response::new(Status::CREATE_ELECTION_INVALID));
         }
-
-        let Ok(internal_election) = InternalElection::try_from(election) else {
+        let Ok(mut election) = InternalElection::try_from(election_req) else {
             return Ok(Response::new(Status::CREATE_ELECTION_UNKNOWN));
         };
 
-        match self.elections.entry(internal_election.name().to_owned()) {
-            Entry::Occupied(_) => return Ok(Response::new(Status::CREATE_ELECTION_UNKNOWN)),
-            Entry::Vacant(e) => {
-                let entry = e.insert(internal_election);
-                info!("Created election: {election:?}", election = entry.value());
+        match self.elections.create(&mut election).await {
+            Ok(true) => {
+                info!("Created election: {election:?}", election = &election);
+                Ok(Response::new(Status::CREATE_ELECTION_SUCCESS))
             }
-        };
-
-        return Ok(Response::new(Status::CREATE_ELECTION_SUCCESS));
+            Ok(false) => Ok(Response::new(Status::CREATE_ELECTION_UNKNOWN)),
+            Err(_) => Ok(Response::new(Status::CREATE_ELECTION_UNKNOWN)),
+        }
     }
 
     #[tracing::instrument(skip_all)]
     async fn cast_vote(&self, req: Request<Vote>) -> RPCResult<Status> {
         let vote_req = req.into_inner();
 
-        let Some(token) = self.tokens.lookup_token(&vote_req.token.value) else {
+        let Some(token) = self.tokens.lookup_token(&vote_req.token.value).await else {
             return Ok(Response::new(Status::CAST_VOTE_AUTH));
         };
-        let Some(voter_entry) = self.voters.get(token.voter_name()) else {
+        let Some(voter) = self.voters.find_user_by_name(token.voter_name()).await.ok().flatten() else {
             return Ok(Response::new(Status::CAST_VOTE_AUTH));
         };
-        let Some(mut election_entry) = self.elections.get_mut(&vote_req.election_name) else {
+        let Ok(Some(mut election)) = self.elections.find_election_by_name(&vote_req.election_name).await else {
             return Ok(Response::new(Status::CAST_VOTE_INVALID));
         };
 
-        if let Err(e) = election_entry
-            .value_mut()
-            .vote(voter_entry.value(), &vote_req.choice_name)
+        if let Ok(result) = self
+            .elections
+            .vote(&mut election, &voter, &vote_req.choice_name)
+            .await
         {
-            Ok(Response::new(e.into()))
+            if let Err(e) = result {
+                Ok(Response::new(e.into()))
+            } else {
+                Ok(Response::new(Status::CAST_VOTE_SUCCESS))
+            }
         } else {
-            Ok(Response::new(Status::CAST_VOTE_SUCCESS))
+            Ok(Response::new(Status::CAST_VOTE_INVALID))
         }
     }
 
@@ -216,14 +212,14 @@ impl EVoting for VotingServer {
     async fn get_result(&self, req: Request<ElectionName>) -> RPCResult<ElectionResult> {
         let election_name = req.into_inner().name;
 
-        let Some(election_entry) = self.elections.get(&election_name) else {
+        let Ok(Some(election)) = self.elections.find_election_by_name(&election_name).await else {
             return Ok(Response::new(ElectionResult::ELECTION_RESULT_NOTFOUND));
         };
-        if !election_entry.value().is_ended() {
+        if !election.is_ended() {
             return Ok(Response::new(ElectionResult::ELECTION_RESULT_ONGOING));
         }
 
-        let vote_counts: Vec<VoteCount> = election_entry
+        let vote_counts: Vec<VoteCount> = election
             .results()
             .map(|(choice, count)| VoteCount {
                 choice_name: choice.to_owned(),
@@ -247,7 +243,7 @@ async fn cronjob_clean_token(server: Arc<VotingServer>) {
     loop {
         interval.tick().await;
         info!("Cleaning expired tokens");
-        server.tokens.clean_expired_token();
+        server.tokens.clean_expired_token().await.ok();
     }
 }
 
@@ -278,7 +274,12 @@ async fn main() -> Result<(), Box<dyn Error>> {
     info!("Connected to database: {:?}", &dbstatus);
 
     let addr = SocketAddr::from((cfg.host, cfg.port));
-    let voting = Arc::new(VotingServer::default());
+    let voting = Arc::new(VotingServer {
+        dbconn: client.clone(),
+        elections: ElectionController::from_db_client(&client).await?,
+        voters: VoterController::from_db_client(&client).await?,
+        tokens: TokenController::from_db_client(&client).await?,
+    });
     tokio::spawn(cronjob_clean_token(voting.clone()));
 
     info!("Starting server listening on {addr}");
