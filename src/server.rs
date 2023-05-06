@@ -15,7 +15,7 @@ use clap::Parser;
 use crate::args::ServerArgs;
 
 use self::config::ServerConfig;
-use couch_rs::Client;
+use couch_rs::Client as CouchClient;
 use dashmap::{mapref::entry::Entry, DashMap};
 use ed25519_dalek::{Signature, Verifier};
 use tokio::time::MissedTickBehavior;
@@ -266,12 +266,14 @@ async fn main() -> Result<(), Box<dyn Error>> {
     info!("Configuration loaded");
 
     debug!("Trying to connect to database: {}", &cfg.database.uri);
-    let client = Client::new_with_timeout(
+    let mut client = CouchClient::new_with_timeout(
         &cfg.database.uri,
         cfg.database.username.as_deref(),
         cfg.database.password.as_deref(),
         cfg.database.timeout,
     )?;
+    client.set_prefix(cfg.database.prefix.clone());
+
     let dbstatus = client.check_status().await?;
     info!("Connected to database: {:?}", &dbstatus);
 

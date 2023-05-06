@@ -27,6 +27,8 @@ pub struct DatabaseConfig {
     pub uri: String,
     pub username: Option<String>,
     pub password: Option<String>,
+    #[serde(default = "default_prefix")]
+    pub prefix: String,
     pub timeout: Option<u64>,
 }
 
@@ -36,4 +38,8 @@ fn default_host() -> IpAddr {
 
 fn default_port() -> u16 {
     50001
+}
+
+fn default_prefix() -> String {
+    String::from("voting_server")
 }
